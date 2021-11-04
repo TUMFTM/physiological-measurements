@@ -1,13 +1,19 @@
 # Physiological Measurements
 
-The package enables you to visually inspect your physiological measurements (EDA and HR) taken with a BITalino
-(r)evolution toolkit ([Link](https://bitalino.com/products/board-kit-ble-bt)). Furthermore, key parameters can be
+The package enables you to visually inspect your physiological measurements taken with a [BITalino
+(r)evolution toolkit](https://bitalino.com/products/board-kit-ble-bt).
+The measurements under consideration include the electrodermal activity (EDA) and
+the electrocardiogram (ECG) or heart rate (HR).
+Furthermore, key parameters can be
 determined such as `EDA_Mean`, `SCL_Mean`, `SCR_Frequency`, `HRV_SDNN`, and so on. \
+
 A user example is provided at the section [Demonstration](#demonstration).
+
+This package is written in Python and is used under Windows or Ubuntu 18.04 or Ubuntu 20.04.
 
 ## Initial Preparation
 
-1. Create appropriate conda env from `environment.yml`
+1. Create appropriate conda env from `environment_*.yml`
 (section [Dependencies](#dependencies))
 2. Specify main storage path into `data_directory.txt`
 3. Run `create_folder_structure.py` to create the folder structure for the data.
@@ -29,7 +35,6 @@ Example files (data and protocol) are provided for the demonstration.
 ## EDA (Electrodermal Activity)
 
 The EDA data can be visually inspected and its key parameters can be determined by the following steps.
-
 Please, carry out the [initial preparation](#initial-preparation) beforehand.
 
 1. Split EDA measurements into phasic and tonic parts:
@@ -60,7 +65,6 @@ Please, carry out the [initial preparation](#initial-preparation) beforehand.
 ## HRV (Heart Rate Variability)
 
 The heart rate data can be visually inspected and its key parameters can be determined by the following steps.
-
 Please, carry out the [initial preparation](#initial-preparation) beforehand.
 
 1. Inspect subject's hr data for artifacts visually. After completion, an `rpeaks` file and a `hr_excluded_intervals`
@@ -118,6 +122,8 @@ conda env create -f environment_ubuntu.yml
 
 ### Manual installation (alternative)
 
+If the installation via the `environment_*.yml` file does not work, the installation can be performed manually using the following commands.
+
 - python 3.8 (`conda create -n <name> python=3.8`)
 - numpy (`conda install numpy`)
 - neurokit2 (`conda install -c conda-forge neurokit2`)
@@ -126,10 +132,6 @@ conda env create -f environment_ubuntu.yml
 - tabulate (`conda install tabulate`)
 
 ## References
-
-This package can be cited with
-
-- TODO
 
 This package uses some functionality provided by
 
