@@ -1,0 +1,345 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>visualize_eda &#8212; Physiological Measurements 1.0 documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for visualize_eda</h1><div class="highlight"><pre>
+<span></span><span class="c1"># Copyright Feiler 2021</span>
+
+<span class="sd">&quot;&quot;&quot;This program visualizes the preprocessed EDA data (&lt;codeword&gt;_eda.txt,</span>
+<span class="sd">EDA, EDA-phasic and EDA-tonic). Click two lines with the mouse,</span>
+<span class="sd">to mark an area in the plot. It can be used for manual labeling as well as</span>
+<span class="sd">the exclusion of artifacts. The intervals are stored to a</span>
+<span class="sd">log-file automatically after the complete data was inspected ([timestamp, index]).</span>
+
+<span class="sd">- Use DELETE (german: ENTF) to remove lastly added line.</span>
+<span class="sd">- Use ESCAPE to deactivate/activate clicking of line.</span>
+<span class="sd">- Use SPACE to shut down the program (and store previous markers).</span>
+
+<span class="sd">Close the plot and the next window opens automatically.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span> <span class="nn">math</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">import</span> <span class="nn">pandas</span> <span class="k">as</span> <span class="nn">pd</span>
+<span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="k">as</span> <span class="nn">plt</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">append_sys_paths</span>
+<span class="kn">from</span> <span class="nn">common.create_folder_structure</span> <span class="kn">import</span> <span class="n">get_data_path</span>
+
+<span class="n">DETAILED_INTERVAL_IN_SEC</span> <span class="o">=</span> <span class="mi">60</span>
+<span class="n">Y_TICKS_INTERVAL</span> <span class="o">=</span> <span class="mf">0.1</span> <span class="c1"># in micro_siemens</span>
+<span class="n">FREQUENCY_IN_HZ</span> <span class="o">=</span> <span class="mi">1000</span>
+<span class="n">NO_OF_INDICES_IN_DETAILED_INTERVAL</span> <span class="o">=</span> <span class="n">FREQUENCY_IN_HZ</span> <span class="o">*</span> <span class="n">DETAILED_INTERVAL_IN_SEC</span>
+<span class="n">MIN_OF_MIKRO_SIEMENS</span> <span class="o">=</span> <span class="mf">0.1</span>
+
+<div class="viewcode-block" id="get_data"><a class="viewcode-back" href="../index.html#visualize_eda.get_data">[docs]</a><span class="k">def</span> <span class="nf">get_data</span><span class="p">(</span><span class="n">path_to_file</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Return preprocessed EDA data&quot;&quot;&quot;</span>
+    <span class="n">data_frame</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">path_to_file</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">header</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">skiprows</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">header</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;EDA&quot;</span><span class="p">,</span> <span class="s2">&quot;EDA-Tonic&quot;</span><span class="p">,</span> <span class="s2">&quot;EDA-Phasic&quot;</span><span class="p">,</span> <span class="s2">&quot;Time&quot;</span><span class="p">]</span>
+    <span class="n">data_frame</span><span class="o">.</span><span class="n">columns</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">(</span><span class="n">header</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">data_frame</span></div>
+
+<div class="viewcode-block" id="get_current_interval"><a class="viewcode-back" href="../index.html#visualize_eda.get_current_interval">[docs]</a><span class="k">def</span> <span class="nf">get_current_interval</span><span class="p">(</span><span class="n">interval_index</span><span class="p">,</span> <span class="n">data_frame</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Returns the data of the current interval based on its index number&quot;&quot;&quot;</span>
+    <span class="n">start_ind</span> <span class="o">=</span> <span class="n">interval_index</span><span class="o">*</span><span class="n">NO_OF_INDICES_IN_DETAILED_INTERVAL</span>
+    <span class="n">end_ind</span> <span class="o">=</span> <span class="p">(</span><span class="n">interval_index</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="n">NO_OF_INDICES_IN_DETAILED_INTERVAL</span>
+    <span class="n">current_interval_data</span> <span class="o">=</span> <span class="n">data_frame</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="n">start_ind</span><span class="p">:</span><span class="n">end_ind</span><span class="p">,</span> <span class="mi">0</span><span class="p">:</span><span class="mi">3</span><span class="p">]</span>
+    <span class="n">indices</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">(</span><span class="n">data_frame</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="n">start_ind</span><span class="p">:</span><span class="n">end_ind</span><span class="p">,</span> <span class="mi">3</span><span class="p">:</span><span class="mi">4</span><span class="p">])</span>
+    <span class="n">current_interval_data</span><span class="o">.</span><span class="n">index</span> <span class="o">=</span> <span class="n">indices</span>
+    <span class="k">return</span> <span class="n">current_interval_data</span></div>
+
+<div class="viewcode-block" id="make_indices_of_data_readable"><a class="viewcode-back" href="../index.html#visualize_eda.make_indices_of_data_readable">[docs]</a><span class="k">def</span> <span class="nf">make_indices_of_data_readable</span><span class="p">(</span><span class="n">pd_data_frame</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Changes the indices of the DataFrame to more readable format in plot&quot;&quot;&quot;</span>
+    <span class="n">new_indices</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">index</span> <span class="ow">in</span> <span class="n">pd_data_frame</span><span class="o">.</span><span class="n">index</span><span class="p">:</span>
+        <span class="n">new_indices</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">index</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">pd_data_frame</span><span class="o">.</span><span class="n">index</span> <span class="o">=</span> <span class="n">new_indices</span></div>
+
+<div class="viewcode-block" id="plot_eda_data"><a class="viewcode-back" href="../index.html#visualize_eda.plot_eda_data">[docs]</a><span class="k">def</span> <span class="nf">plot_eda_data</span><span class="p">(</span><span class="n">input_data_frame</span><span class="p">,</span> <span class="n">axes</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Plots the provided data&quot;&quot;&quot;</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">sca</span><span class="p">(</span><span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">input_data_frame</span><span class="o">.</span><span class="n">iloc</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">plot</span><span class="p">()</span>
+    <span class="n">input_data_frame</span><span class="o">.</span><span class="n">iloc</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">plot</span><span class="p">()</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">gca</span><span class="p">()</span><span class="o">.</span><span class="n">get_lines</span><span class="p">()[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_color</span><span class="p">(</span><span class="s2">&quot;green&quot;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">sca</span><span class="p">(</span><span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+    <span class="n">input_data_frame</span><span class="o">.</span><span class="n">iloc</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">plot</span><span class="p">()</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">gca</span><span class="p">()</span><span class="o">.</span><span class="n">get_lines</span><span class="p">()[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_color</span><span class="p">(</span><span class="s2">&quot;brown&quot;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="set_y_ticks"><a class="viewcode-back" href="../index.html#visualize_eda.set_y_ticks">[docs]</a><span class="k">def</span> <span class="nf">set_y_ticks</span><span class="p">(</span><span class="n">current_axes</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Add background y ticks&quot;&quot;&quot;</span>
+    <span class="n">y_range</span> <span class="o">=</span> <span class="n">current_axes</span><span class="o">.</span><span class="n">get_ylim</span><span class="p">()</span>
+    <span class="n">y_ticks_micro_siemens</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">y_range</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">y_range</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>\
+                                           <span class="n">Y_TICKS_INTERVAL</span><span class="p">))</span>
+    <span class="n">current_axes</span><span class="o">.</span><span class="n">set_yticks</span><span class="p">(</span><span class="n">y_ticks_micro_siemens</span><span class="p">,</span> <span class="n">minor</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">current_axes</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="n">which</span><span class="o">=</span><span class="s2">&quot;minor&quot;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="set_x_ticks_per_min"><a class="viewcode-back" href="../index.html#visualize_eda.set_x_ticks_per_min">[docs]</a><span class="k">def</span> <span class="nf">set_x_ticks_per_min</span><span class="p">(</span><span class="n">current_axes</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Add background x ticks&quot;&quot;&quot;</span>
+    <span class="n">x_ticks_seconds</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="n">NO_OF_INDICES_IN_DETAILED_INTERVAL</span><span class="p">,</span><span class="n">FREQUENCY_IN_HZ</span><span class="p">))</span>
+    <span class="n">current_axes</span><span class="o">.</span><span class="n">set_xticks</span><span class="p">(</span><span class="n">x_ticks_seconds</span><span class="p">,</span><span class="n">minor</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">current_axes</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="n">which</span><span class="o">=</span><span class="s2">&quot;minor&quot;</span><span class="p">,</span><span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span></div>
+
+<span class="n">INTERVALS</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="n">intervals_readable</span> <span class="o">=</span> <span class="p">[]</span>
+<div class="viewcode-block" id="store_x_click_in_interval"><a class="viewcode-back" href="../index.html#visualize_eda.store_x_click_in_interval">[docs]</a><span class="k">def</span> <span class="nf">store_x_click_in_interval</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Store clicked x-data into global variable&quot;&quot;&quot;</span>
+    <span class="n">INTERVALS</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">xdata</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="len_is_even"><a class="viewcode-back" href="../index.html#visualize_eda.len_is_even">[docs]</a><span class="k">def</span> <span class="nf">len_is_even</span><span class="p">(</span><span class="n">input_list</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Check if list has even length&quot;&quot;&quot;</span>
+    <span class="n">return_bool</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="k">if</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">input_list</span><span class="p">)</span><span class="o">%</span><span class="mi">2</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">return_bool</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">return</span> <span class="n">return_bool</span></div>
+
+<div class="viewcode-block" id="create_line_and_filled_area"><a class="viewcode-back" href="../index.html#visualize_eda.create_line_and_filled_area">[docs]</a><span class="k">def</span> <span class="nf">create_line_and_filled_area</span><span class="p">(</span><span class="n">event</span><span class="p">,</span> <span class="n">axis</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Visualize clicks as lines and filled area&quot;&quot;&quot;</span>
+    <span class="n">minimum_value</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">first_time</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">axis</span><span class="o">.</span><span class="n">lines</span><span class="p">:</span>
+        <span class="n">current_min</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">line</span><span class="o">.</span><span class="n">get_ydata</span><span class="p">())</span>
+        <span class="k">if</span> <span class="n">current_min</span> <span class="o">&lt;</span> <span class="n">minimum_value</span><span class="p">:</span>
+            <span class="n">minimum_value</span> <span class="o">=</span> <span class="n">current_min</span>
+        <span class="k">if</span> <span class="n">first_time</span><span class="p">:</span>
+            <span class="n">minimum_value</span> <span class="o">=</span> <span class="n">current_min</span>
+            <span class="n">first_time</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">maximum_value</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">first_time</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">axis</span><span class="o">.</span><span class="n">lines</span><span class="p">:</span>
+        <span class="n">current_max</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">line</span><span class="o">.</span><span class="n">get_ydata</span><span class="p">())</span>
+        <span class="k">if</span> <span class="n">current_max</span> <span class="o">&gt;</span> <span class="n">maximum_value</span><span class="p">:</span>
+            <span class="n">maximum_value</span> <span class="o">=</span> <span class="n">current_max</span>
+        <span class="k">if</span> <span class="n">first_time</span><span class="p">:</span>
+            <span class="n">maximum_value</span> <span class="o">=</span> <span class="n">current_max</span>
+            <span class="n">first_time</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="n">axis</span><span class="o">.</span><span class="n">vlines</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">xdata</span><span class="p">,</span> <span class="n">minimum_value</span><span class="p">,</span> <span class="n">maximum_value</span><span class="p">,</span> <span class="n">colors</span><span class="o">=</span><span class="s1">&#39;orange&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">len_is_even</span><span class="p">(</span><span class="n">INTERVALS</span><span class="p">):</span>
+        <span class="n">axis</span><span class="o">.</span><span class="n">fill_betweenx</span><span class="p">([</span><span class="n">minimum_value</span><span class="p">,</span> <span class="n">maximum_value</span><span class="p">],</span> <span class="n">INTERVALS</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">],</span> \
+                           <span class="n">INTERVALS</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">facecolor</span><span class="o">=</span><span class="s1">&#39;orange&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.1</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">draw</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="second_click_is_not_right_from_previous"><a class="viewcode-back" href="../index.html#visualize_eda.second_click_is_not_right_from_previous">[docs]</a><span class="k">def</span> <span class="nf">second_click_is_not_right_from_previous</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Check if second click is later in time than previous&quot;&quot;&quot;</span>
+    <span class="n">second_click_is_smaller_than_first</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="k">global</span> <span class="n">INTERVALS</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">len_is_even</span><span class="p">(</span><span class="n">INTERVALS</span><span class="p">):</span>
+        <span class="c1"># new click is the second one</span>
+        <span class="k">if</span> <span class="n">INTERVALS</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">&gt;=</span><span class="n">event</span><span class="o">.</span><span class="n">xdata</span><span class="p">:</span>
+            <span class="n">second_click_is_smaller_than_first</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">return</span> <span class="n">second_click_is_smaller_than_first</span></div>
+
+<span class="n">CLICK_CALLBACK_TURNED_OFF</span> <span class="o">=</span> <span class="kc">False</span>
+<div class="viewcode-block" id="onclick"><a class="viewcode-back" href="../index.html#visualize_eda.onclick">[docs]</a><span class="k">def</span> <span class="nf">onclick</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Handle user click&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">CLICK_CALLBACK_TURNED_OFF</span><span class="p">:</span>
+        <span class="k">return</span>
+    <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="s2">&quot;button_press_event&quot;</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">second_click_is_not_right_from_previous</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Intervals must start at start time. Click is not processed.&quot;</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="n">store_x_click_in_interval</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
+        <span class="n">axes</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">gcf</span><span class="p">()</span><span class="o">.</span><span class="n">axes</span>
+        <span class="k">for</span> <span class="n">current_axes</span> <span class="ow">in</span> <span class="n">axes</span><span class="p">:</span>
+            <span class="n">create_line_and_filled_area</span><span class="p">(</span><span class="n">event</span><span class="p">,</span> <span class="n">current_axes</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="delete_last_line_added"><a class="viewcode-back" href="../index.html#visualize_eda.delete_last_line_added">[docs]</a><span class="k">def</span> <span class="nf">delete_last_line_added</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;Delete lastly added line from plot&quot;&quot;&quot;</span>
+    <span class="n">current_axes</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">gcf</span><span class="p">()</span><span class="o">.</span><span class="n">axes</span>
+    <span class="k">for</span> <span class="n">current_axes</span> <span class="ow">in</span> <span class="n">current_axes</span><span class="p">:</span>
+        <span class="n">all_collections</span> <span class="o">=</span> <span class="n">current_axes</span><span class="o">.</span><span class="n">collections</span>
+        <span class="n">last</span> <span class="o">=</span> <span class="n">all_collections</span><span class="o">.</span><span class="n">pop</span><span class="p">()</span>
+        <span class="n">typ</span> <span class="o">=</span> <span class="nb">type</span><span class="p">(</span><span class="n">last</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Removed element &quot;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">typ</span><span class="p">))</span>
+        <span class="k">if</span> <span class="s2">&quot;PolyCollection&quot;</span> <span class="ow">in</span> <span class="n">typ</span><span class="o">.</span><span class="vm">__name__</span><span class="p">:</span>
+            <span class="n">again</span> <span class="o">=</span> <span class="n">all_collections</span><span class="o">.</span><span class="n">pop</span><span class="p">()</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Removed element &quot;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="nb">type</span><span class="p">(</span><span class="n">again</span><span class="p">)))</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">draw</span><span class="p">()</span></div>
+
+<span class="n">SHUT_DOWN_PROGRAM</span> <span class="o">=</span> <span class="kc">False</span>
+<div class="viewcode-block" id="on_key"><a class="viewcode-back" href="../index.html#visualize_eda.on_key">[docs]</a><span class="k">def</span> <span class="nf">on_key</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Handle user keypress&quot;&quot;&quot;</span>
+    <span class="k">global</span> <span class="n">CLICK_CALLBACK_TURNED_OFF</span>
+    <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">key</span> <span class="o">==</span> <span class="s1">&#39;escape&#39;</span><span class="p">:</span>
+        <span class="n">CLICK_CALLBACK_TURNED_OFF</span> <span class="o">=</span> <span class="ow">not</span> <span class="n">CLICK_CALLBACK_TURNED_OFF</span>
+        <span class="k">if</span> <span class="n">CLICK_CALLBACK_TURNED_OFF</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Custom onclick callback deactivated&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Custom onclick callback activated&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">key</span> <span class="o">==</span> <span class="s1">&#39;delete&#39;</span><span class="p">:</span>
+        <span class="k">global</span> <span class="n">INTERVALS</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">INTERVALS</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">del</span> <span class="n">INTERVALS</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">delete_last_line_added</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">key</span> <span class="o">==</span> <span class="s1">&#39; &#39;</span><span class="p">:</span>
+        <span class="k">global</span> <span class="n">SHUT_DOWN_PROGRAM</span>
+        <span class="n">SHUT_DOWN_PROGRAM</span> <span class="o">=</span> <span class="kc">True</span></div>
+
+<div class="viewcode-block" id="correct_index_to_current_interval"><a class="viewcode-back" href="../index.html#visualize_eda.correct_index_to_current_interval">[docs]</a><span class="k">def</span> <span class="nf">correct_index_to_current_interval</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">input_data_frame</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;&quot;Trim clicks next to interval to currently visualized interval&quot;&quot;&quot;</span>
+    <span class="n">corrected_index</span> <span class="o">=</span> <span class="n">index</span>
+    <span class="n">corrected_index</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">input_data_frame</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">corrected_index</span><span class="p">)</span>
+    <span class="n">corrected_index</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">corrected_index</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">corrected_index</span></div>
+
+<div class="viewcode-block" id="transfer_intervals_into_readable_format_and_reset_intervals"><a class="viewcode-back" href="../index.html#visualize_eda.transfer_intervals_into_readable_format_and_reset_intervals">[docs]</a><span class="k">def</span> <span class="nf">transfer_intervals_into_readable_format_and_reset_intervals</span><span class="p">(</span><span class="n">data_frame</span><span class="p">,</span> <span class="n">no_of_interval</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Read the function name&quot;&quot;&quot;</span>
+    <span class="k">for</span> <span class="n">current_interval</span> <span class="ow">in</span> <span class="n">INTERVALS</span><span class="p">:</span>
+        <span class="n">no_index</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">current_interval</span><span class="p">)</span>
+        <span class="n">corr_index</span> <span class="o">=</span> <span class="n">correct_index_to_current_interval</span><span class="p">(</span><span class="n">no_index</span><span class="p">,</span> <span class="n">data_frame</span><span class="p">)</span>
+        <span class="n">time_stamp</span> <span class="o">=</span> <span class="n">data_frame</span><span class="o">.</span><span class="n">index</span><span class="p">[</span><span class="n">corr_index</span><span class="p">]</span>
+        <span class="n">overall_index</span> <span class="o">=</span> <span class="n">no_of_interval</span><span class="o">*</span><span class="n">NO_OF_INDICES_IN_DETAILED_INTERVAL</span> <span class="o">+</span> <span class="n">corr_index</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;time stamp &quot;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">time_stamp</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot; added&quot;</span><span class="p">)</span>
+        <span class="n">appended</span> <span class="o">=</span> <span class="p">[</span><span class="n">time_stamp</span><span class="p">,</span> <span class="n">overall_index</span><span class="p">]</span>
+        <span class="n">intervals_readable</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">appended</span><span class="p">)</span>
+    <span class="k">del</span> <span class="n">INTERVALS</span><span class="p">[:]</span></div>
+
+<div class="viewcode-block" id="add_plot_description"><a class="viewcode-back" href="../index.html#visualize_eda.add_plot_description">[docs]</a><span class="k">def</span> <span class="nf">add_plot_description</span><span class="p">(</span><span class="n">current_axes_array</span><span class="p">,</span> <span class="n">subject</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Read the function name&quot;&quot;&quot;</span>
+    <span class="n">current_axes_array</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s2">&quot;Time in hh:mm:ss.ms&quot;</span><span class="p">)</span>
+    <span class="n">current_axes_array</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s2">&quot;Skin conductance in </span><span class="se">\u03BC</span><span class="s2">S&quot;</span><span class="p">)</span>
+    <span class="n">current_axes_array</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s2">&quot;Skin conductance in </span><span class="se">\u03BC</span><span class="s2">S&quot;</span><span class="p">)</span>
+    <span class="n">current_axes_array</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s2">&quot;Skin conductance of subject &quot;</span> <span class="o">+</span> \
+                                    <span class="nb">str</span><span class="p">(</span><span class="n">subject</span><span class="p">))</span>
+    <span class="k">for</span> <span class="n">axes</span> <span class="ow">in</span> <span class="n">current_axes_array</span><span class="p">:</span>
+        <span class="n">axes</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="turn_grids_on"><a class="viewcode-back" href="../index.html#visualize_eda.turn_grids_on">[docs]</a><span class="k">def</span> <span class="nf">turn_grids_on</span><span class="p">(</span><span class="n">axes</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Read the function name&quot;&quot;&quot;</span>
+    <span class="k">for</span> <span class="n">current_axes</span> <span class="ow">in</span> <span class="n">axes</span><span class="p">:</span>
+        <span class="n">current_axes</span><span class="o">.</span><span class="n">grid</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="maximize_window"><a class="viewcode-back" href="../index.html#visualize_eda.maximize_window">[docs]</a><span class="k">def</span> <span class="nf">maximize_window</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;Read the function name&quot;&quot;&quot;</span>
+    <span class="n">manager</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">get_current_fig_manager</span><span class="p">()</span>
+    <span class="n">manager</span><span class="o">.</span><span class="n">window</span><span class="o">.</span><span class="n">showMaximized</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="visualize_detailed_view"><a class="viewcode-back" href="../index.html#visualize_eda.visualize_detailed_view">[docs]</a><span class="k">def</span> <span class="nf">visualize_detailed_view</span><span class="p">(</span><span class="n">data_frame</span><span class="p">,</span> <span class="n">current_subject</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Read the function name&quot;&quot;&quot;</span>
+    <span class="n">make_indices_of_data_readable</span><span class="p">(</span><span class="n">data_frame</span><span class="p">)</span>
+    <span class="n">fig</span><span class="p">,</span> <span class="n">axes</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="n">plot_eda_data</span><span class="p">(</span><span class="n">data_frame</span><span class="p">,</span> <span class="n">axes</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">current_axes</span> <span class="ow">in</span> <span class="n">axes</span><span class="p">:</span>
+        <span class="n">set_y_ticks</span><span class="p">(</span><span class="n">current_axes</span><span class="p">)</span>
+        <span class="n">set_x_ticks_per_min</span><span class="p">(</span><span class="n">current_axes</span><span class="p">)</span>
+    <span class="n">add_plot_description</span><span class="p">(</span><span class="n">axes</span><span class="p">,</span> <span class="n">current_subject</span><span class="p">)</span>
+    <span class="n">turn_grids_on</span><span class="p">(</span><span class="n">axes</span><span class="p">)</span>
+    <span class="n">fig</span><span class="o">.</span><span class="n">canvas</span><span class="o">.</span><span class="n">mpl_connect</span><span class="p">(</span><span class="s1">&#39;button_press_event&#39;</span><span class="p">,</span> <span class="n">onclick</span><span class="p">)</span>
+    <span class="n">fig</span><span class="o">.</span><span class="n">canvas</span><span class="o">.</span><span class="n">mpl_connect</span><span class="p">(</span><span class="s1">&#39;key_press_event&#39;</span><span class="p">,</span> <span class="n">on_key</span><span class="p">)</span>
+    <span class="n">maximize_window</span><span class="p">()</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="visualize_segment_per_segment"><a class="viewcode-back" href="../index.html#visualize_eda.visualize_segment_per_segment">[docs]</a><span class="k">def</span> <span class="nf">visualize_segment_per_segment</span><span class="p">(</span><span class="n">complete_data_as_pd</span><span class="p">,</span> <span class="n">cur_subject</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Show plot for user interaction&quot;&quot;&quot;</span>
+    <span class="n">no_of_detailed_intervals</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="n">complete_data_as_pd</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">/</span>
+                                         <span class="n">NO_OF_INDICES_IN_DETAILED_INTERVAL</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">int_number</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">no_of_detailed_intervals</span><span class="p">):</span>
+        <span class="n">skip_first_number_of_plots</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">if</span> <span class="n">int_number</span> <span class="o">&lt;</span> <span class="n">skip_first_number_of_plots</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="k">global</span> <span class="n">SHUT_DOWN_PROGRAM</span>
+        <span class="k">if</span> <span class="n">SHUT_DOWN_PROGRAM</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="n">get_current_interval</span><span class="p">(</span><span class="n">int_number</span><span class="p">,</span> <span class="n">complete_data_as_pd</span><span class="p">)</span>
+        <span class="n">visualize_detailed_view</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">cur_subject</span><span class="p">)</span>
+        <span class="n">transfer_intervals_into_readable_format_and_reset_intervals</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">int_number</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="write_data_to_file"><a class="viewcode-back" href="../index.html#visualize_eda.write_data_to_file">[docs]</a><span class="k">def</span> <span class="nf">write_data_to_file</span><span class="p">(</span><span class="n">path_to_file</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Store the work into file&quot;&quot;&quot;</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">path_to_file</span><span class="p">,</span> <span class="s2">&quot;w&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">write_file</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">elem</span> <span class="ow">in</span> <span class="n">intervals_readable</span><span class="p">:</span>
+            <span class="n">write_file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">elem</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span> <span class="o">+</span> <span class="s2">&quot;,&quot;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">elem</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="main"><a class="viewcode-back" href="../index.html#visualize_eda.main">[docs]</a><span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="n">subject</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Main function&quot;&quot;&quot;</span>
+    <span class="n">main_data_path</span> <span class="o">=</span> <span class="n">get_data_path</span><span class="p">()</span>
+    <span class="n">preprocessed_eda_file</span> <span class="o">=</span> <span class="n">main_data_path</span> <span class="o">+</span> <span class="s1">&#39;/03_eda_preprocessed/&#39;</span> <span class="o">+</span> <span class="n">subject</span> <span class="o">+</span> \
+                            <span class="s2">&quot;_eda.txt&quot;</span>
+    <span class="n">loaded_data</span> <span class="o">=</span> <span class="n">get_data</span><span class="p">(</span><span class="n">preprocessed_eda_file</span><span class="p">)</span>
+    <span class="n">visualize_segment_per_segment</span><span class="p">(</span><span class="n">loaded_data</span><span class="p">,</span> <span class="n">subject</span><span class="p">)</span>
+
+    <span class="n">excluded_interv_storage</span> <span class="o">=</span> <span class="n">main_data_path</span> <span class="o">+</span> <span class="s1">&#39;/04_eda_excluded_intervals/&#39;</span> <span class="o">+</span> <span class="n">subject</span> <span class="o">+</span> \
+                           <span class="s2">&quot;_excluded.txt&quot;</span>
+    <span class="n">write_data_to_file</span><span class="p">(</span><span class="n">excluded_interv_storage</span><span class="p">)</span></div>
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">if</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">))</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Usage: Pass subject tag as argument 1&quot;</span><span class="p">)</span>
+        <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">()</span>
+    <span class="n">subject_tag</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+    <span class="n">main</span><span class="p">(</span><span class="n">subject_tag</span><span class="p">)</span>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper"><div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2021, Johannes Feiler.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 3.2.1</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

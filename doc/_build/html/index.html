@@ -1,0 +1,146 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Indices and tables &#8212; Physiological Measurements 1.0 documentation</title>
+    <link rel="stylesheet" href="_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="section" id="indices-and-tables">
+<h1>Indices and tables<a class="headerlink" href="#indices-and-tables" title="Permalink to this headline">¶</a></h1>
+<ul class="simple">
+<li><p><a class="reference internal" href="genindex.html"><span class="std std-ref">Index</span></a></p></li>
+<li><p><a class="reference internal" href="py-modindex.html"><span class="std std-ref">Module Index</span></a></p></li>
+<li><p><a class="reference internal" href="search.html"><span class="std std-ref">Search Page</span></a></p></li>
+</ul>
+</div>
+<div class="section" id="welcome-to-physiological-measurements-s-documentation">
+<h1>Welcome to Physiological Measurements’s documentation!<a class="headerlink" href="#welcome-to-physiological-measurements-s-documentation" title="Permalink to this headline">¶</a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<div class="section" id="module-visualize_eda">
+<span id="visualize-eda"></span><h2>visualize_eda<a class="headerlink" href="#module-visualize_eda" title="Permalink to this headline">¶</a></h2>
+<p>This program visualizes the preprocessed EDA data (&lt;codeword&gt;_eda.txt,
+EDA, EDA-phasic and EDA-tonic). Click two lines with the mouse,
+to mark an area in the plot. It can be used for manual labeling as well as
+the exclusion of artifacts. The intervals are stored to a
+log-file automatically after the complete data was inspected ([timestamp, index]).</p>
+<ul class="simple">
+<li><p>Use DELETE (german: ENTF) to remove lastly added line.</p></li>
+<li><p>Use ESCAPE to deactivate/activate clicking of line.</p></li>
+<li><p>Use SPACE to shut down the program (and store previous markers).</p></li>
+</ul>
+<p>Close the plot and the next window opens automatically.</p>
+</div>
+<div class="section" id="module-visualize_hr_one_subject">
+<span id="visualize-hr-one-subject"></span><h2>visualize_hr_one_subject<a class="headerlink" href="#module-visualize_hr_one_subject" title="Permalink to this headline">¶</a></h2>
+<p>Visualize ECG-data of proband.
+The goal is to produce one _ecg_rpeaks.txt file, in which</p>
+<ul class="simple">
+<li><p>nan stands for: artifact area –&gt; exclusion of intervals for sdnn analysis</p></li>
+<li><p>wrongly detected peaks are deleted</p></li>
+<li><p>peaks, missed by detection, are added</p></li>
+</ul>
+<p>Manual:</p>
+<ul class="simple">
+<li><p>D activates the ‘delete mode’ –&gt; a mouse click deletes the next rpeak</p></li>
+<li><dl class="simple">
+<dt>A activates the ‘add mode’ –&gt; a mouse click defines the next rpeak</dt><dd><p>(highest point close to mouse click)</p>
+</dd>
+</dl>
+</li>
+<li><p>E activates the ‘exclude mode’ –&gt; two mouse clicks define an exclusion interval</p></li>
+<li><p>I activates the ‘exact add mode’ –&gt; a mouse click defines exactly the next rpeak</p></li>
+<li><p>SPACE: current plot is closed and next interval is loaded</p></li>
+</ul>
+</div>
+<div class="section" id="module-create_folder_structure">
+<span id="create-folder-structure"></span><h2>create_folder_structure<a class="headerlink" href="#module-create_folder_structure" title="Permalink to this headline">¶</a></h2>
+<p>Reads path from data_directory.txt and creates in that folder the respective
+folder structure</p>
+<dl class="py function">
+<dt id="create_folder_structure.create_folders">
+<code class="sig-prename descclassname">create_folder_structure.</code><code class="sig-name descname">create_folders</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">data_path</span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/create_folder_structure.html#create_folders"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#create_folder_structure.create_folders" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create respective folders for data storage and loading</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="create_folder_structure.get_data_path">
+<code class="sig-prename descclassname">create_folder_structure.</code><code class="sig-name descname">get_data_path</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/create_folder_structure.html#get_data_path"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#create_folder_structure.get_data_path" title="Permalink to this definition">¶</a></dt>
+<dd><p>Look for data_directory.txt. Its content is desired data path.</p>
+</dd></dl>
+
+<span class="target" id="module-visualize_hr_all_subjects"></span><p>Calls one proband after another for visual ecg data inspection.
+The GUI-manual is on the top of visualize_hr_one_subject.py</p>
+</div>
+</div>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper"><div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="#">Documentation overview</a><ul>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2021, Johannes Feiler.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 3.2.1</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="_sources/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

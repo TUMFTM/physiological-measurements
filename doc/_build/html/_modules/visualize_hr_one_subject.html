@@ -1,0 +1,360 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>visualize_hr_one_subject &#8212; Physiological Measurements 1.0 documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for visualize_hr_one_subject</h1><div class="highlight"><pre>
+<span></span><span class="c1"># Copyright Feiler 2021</span>
+
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Visualize ECG-data of proband.</span>
+<span class="sd">The goal is to produce one _ecg_rpeaks.txt file, in which</span>
+
+<span class="sd">- nan stands for: artifact area --&gt; exclusion of intervals for sdnn analysis</span>
+<span class="sd">- wrongly detected peaks are deleted</span>
+<span class="sd">- peaks, missed by detection, are added</span>
+
+<span class="sd">Manual:</span>
+
+<span class="sd">- D activates the &#39;delete mode&#39; --&gt; a mouse click deletes the next rpeak</span>
+<span class="sd">- A activates the &#39;add mode&#39; --&gt; a mouse click defines the next rpeak</span>
+<span class="sd">    (highest point close to mouse click)</span>
+<span class="sd">- E activates the &#39;exclude mode&#39; --&gt; two mouse clicks define an exclusion interval</span>
+<span class="sd">- I activates the &#39;exact add mode&#39; --&gt; a mouse click defines exactly the next rpeak</span>
+
+<span class="sd">- SPACE: current plot is closed and next interval is loaded</span>
+
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span> <span class="nn">json</span>
+<span class="kn">import</span> <span class="nn">math</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">import</span> <span class="nn">datetime</span>
+<span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="k">as</span> <span class="nn">plt</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">from</span> <span class="nn">numpy.core.defchararray</span> <span class="kn">import</span> <span class="n">index</span>
+<span class="kn">import</span> <span class="nn">pandas</span> <span class="k">as</span> <span class="nn">pd</span>
+<span class="kn">import</span> <span class="nn">neurokit2</span> <span class="k">as</span> <span class="nn">nk</span>
+<span class="kn">from</span> <span class="nn">scipy.signal</span> <span class="kn">import</span> <span class="n">argrelextrema</span>
+<span class="kn">import</span> <span class="nn">append_sys_paths</span>
+<span class="kn">from</span> <span class="nn">hr_includes</span> <span class="kn">import</span> <span class="n">helper_function</span>
+<span class="kn">from</span> <span class="nn">hr_includes.hr_settings</span> <span class="kn">import</span> <span class="n">HrSettings</span> <span class="k">as</span> <span class="n">hr</span>
+<span class="kn">from</span> <span class="nn">hr_includes.exclusion_tracker</span> <span class="kn">import</span> <span class="n">ExclusionTracker</span><span class="p">,</span> <span class="n">SecondIndexIsSmallerThanFirst</span>
+<span class="kn">from</span> <span class="nn">common</span> <span class="kn">import</span> <span class="n">file_reader</span>
+<span class="kn">from</span> <span class="nn">common.create_folder_structure</span> <span class="kn">import</span> <span class="n">get_data_path</span>
+
+<div class="viewcode-block" id="Proband"><a class="viewcode-back" href="../index.html#visualize_hr_one_subject.Proband">[docs]</a><span class="k">class</span> <span class="nc">Proband</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;A proband can be plotted and its automatically detected peaks can be</span>
+<span class="sd">    corrected&quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">raw_data_path</span><span class="p">,</span> <span class="n">window_size_s</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__data_path</span> <span class="o">=</span> <span class="n">raw_data_path</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__sampling_rate</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__ecg</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__ecg_rpeak_indices</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__current_st_ind</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__window_size_s</span> <span class="o">=</span> <span class="n">window_size_s</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__current_mode</span> <span class="o">=</span> <span class="n">hr</span><span class="o">.</span><span class="n">DEL_PEAK</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__exclusion_tracker</span> <span class="o">=</span> <span class="n">ExclusionTracker</span><span class="p">()</span>
+
+<div class="viewcode-block" id="Proband.load_data"><a class="viewcode-back" href="../index.html#visualize_hr_one_subject.Proband.load_data">[docs]</a>    <span class="k">def</span> <span class="nf">load_data</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;load the ecg data&quot;&quot;&quot;</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Started to load data for </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">__data_path</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__sampling_rate</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__get_from_file_header</span><span class="p">(</span><span class="s1">&#39;sampling rate&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__ecg</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__get_transformed_ecg_data</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__ecg</span> <span class="o">=</span> <span class="n">nk</span><span class="o">.</span><span class="n">ecg_clean</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">__ecg</span><span class="p">,</span> <span class="n">sampling_rate</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">__sampling_rate</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__ecg_rpeak_indices</span> <span class="o">=</span> \
+            <span class="n">nk</span><span class="o">.</span><span class="n">ecg_findpeaks</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">__ecg</span><span class="p">,</span>
+                             <span class="n">sampling_rate</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">__sampling_rate</span><span class="p">)[</span><span class="s1">&#39;ECG_R_Peaks&#39;</span><span class="p">]</span></div>
+
+    <span class="k">def</span> <span class="nf">__get_from_file_header</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;&quot;return something found in the file&#39;s header&quot;&quot;&quot;</span>
+        <span class="n">found_value</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">__data_path</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">data_file</span><span class="p">:</span>
+            <span class="k">if</span> <span class="s1">&#39;OpenSignals&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">data_file</span><span class="o">.</span><span class="n">readline</span><span class="p">()):</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;wrong file at </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">__data_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">meta_data</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">data_file</span><span class="o">.</span><span class="n">readline</span><span class="p">()</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;#&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">))</span>
+            <span class="n">meta_data</span> <span class="o">=</span> <span class="n">meta_data</span><span class="p">[</span><span class="nb">list</span><span class="p">(</span><span class="n">meta_data</span><span class="o">.</span><span class="n">keys</span><span class="p">())[</span><span class="mi">0</span><span class="p">]]</span>
+            <span class="n">found_value</span> <span class="o">=</span> <span class="n">meta_data</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">found_value</span>
+
+    <span class="k">def</span> <span class="nf">__get_transformed_ecg_data</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;returns transformed but unmodified ecg data as pd.Series&quot;&quot;&quot;</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">__data_path</span><span class="p">,</span> <span class="n">skiprows</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">&quot;</span><span class="se">\t</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">usecols</span><span class="o">=</span><span class="p">[</span><span class="mi">5</span><span class="p">,</span><span class="mi">6</span><span class="p">],</span>
+                           <span class="n">header</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+        <span class="n">ecg</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">iloc</span><span class="p">[:,</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">ecg</span> <span class="o">=</span> <span class="n">file_reader</span><span class="o">.</span><span class="n">ecg_transfer_function</span><span class="p">(</span><span class="n">ecg</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">ecg</span>
+
+<div class="viewcode-block" id="Proband.visualize_iteratively"><a class="viewcode-back" href="../index.html#visualize_hr_one_subject.Proband.visualize_iteratively">[docs]</a>    <span class="k">def</span> <span class="nf">visualize_iteratively</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;iterate over data to be visualized&quot;&quot;&quot;</span>
+        <span class="n">samples_per_window</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__window_size_s</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">__sampling_rate</span>
+        <span class="n">number_of_windows</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">__ecg</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">/</span> <span class="n">samples_per_window</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Plotting&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">number</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">number_of_windows</span><span class="p">):</span>
+            <span class="n">title</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;ECG interval </span><span class="si">{</span><span class="n">number</span> <span class="o">+</span> <span class="mi">1</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">number_of_windows</span><span class="si">}</span><span class="s2"> of &quot;</span> <span class="o">+</span>\
+                    <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">__data_path</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">__plot_data</span><span class="p">(</span><span class="n">number</span><span class="p">,</span> <span class="n">title</span><span class="p">,</span> <span class="n">samples_per_window</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">__plot_data</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">number</span><span class="p">,</span> <span class="n">title</span><span class="p">,</span> <span class="n">samples_per_window</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Plot everything&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__current_mode</span> <span class="o">=</span> <span class="n">hr</span><span class="o">.</span><span class="n">DEL_PEAK</span> <span class="c1"># reset to del mode, less error prone</span>
+<span class="c1">#        fig, axes = plt.suplots(3, 1)</span>
+<span class="c1">#        plt.sca(axes[0])</span>
+        <span class="n">fig</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">figure</span><span class="p">()</span>
+        <span class="n">axes</span> <span class="o">=</span> <span class="n">fig</span><span class="o">.</span><span class="n">add_subplot</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">sca</span><span class="p">(</span><span class="n">axes</span><span class="p">)</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">gca</span><span class="p">()</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="n">title</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__current_st_ind</span> <span class="o">=</span> <span class="n">number</span><span class="o">*</span><span class="n">samples_per_window</span>
+        <span class="n">end_ind</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__current_st_ind</span> <span class="o">+</span> <span class="n">samples_per_window</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">__ecg</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">__current_st_ind</span><span class="p">:</span><span class="n">end_ind</span><span class="p">],</span> <span class="n">label</span><span class="o">=</span><span class="n">hr</span><span class="o">.</span><span class="n">ECG_SIGNAL</span><span class="p">,</span> <span class="n">picker</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">get_current_fig_manager</span><span class="p">()</span><span class="o">.</span><span class="n">window</span><span class="o">.</span><span class="n">showMaximized</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__plot_peaks</span><span class="p">()</span>
+
+        <span class="n">fig</span><span class="o">.</span><span class="n">canvas</span><span class="o">.</span><span class="n">mpl_connect</span><span class="p">(</span><span class="s1">&#39;key_press_event&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">__on_key</span><span class="p">)</span>
+        <span class="n">fig</span><span class="o">.</span><span class="n">canvas</span><span class="o">.</span><span class="n">mpl_connect</span><span class="p">(</span><span class="s1">&#39;button_press_event&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">__on_click</span><span class="p">)</span>
+        <span class="n">fig</span><span class="o">.</span><span class="n">canvas</span><span class="o">.</span><span class="n">mpl_connect</span><span class="p">(</span><span class="s1">&#39;pick_event&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">__on_pick</span><span class="p">)</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">__on_key</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Callback on key press&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">key</span> <span class="o">==</span> <span class="n">hr</span><span class="o">.</span><span class="n">DEL_KEY</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">__current_mode</span> <span class="o">=</span> <span class="n">hr</span><span class="o">.</span><span class="n">DEL_PEAK</span>
+        <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">key</span> <span class="o">==</span> <span class="n">hr</span><span class="o">.</span><span class="n">ADD_KEY</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">__current_mode</span> <span class="o">=</span> <span class="n">hr</span><span class="o">.</span><span class="n">ADD_PEAK</span>
+        <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">key</span> <span class="o">==</span> <span class="n">hr</span><span class="o">.</span><span class="n">EXCLUDE_KEY</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">__current_mode</span> <span class="o">=</span> <span class="n">hr</span><span class="o">.</span><span class="n">EXCLUDE_INTERVAL</span>
+        <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">key</span> <span class="o">==</span> <span class="n">hr</span><span class="o">.</span><span class="n">EXACT_PICKING_KEY</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">__current_mode</span> <span class="o">=</span> <span class="n">hr</span><span class="o">.</span><span class="n">EXACT_PICKING</span>
+        <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">key</span> <span class="o">==</span> <span class="s2">&quot; &quot;</span><span class="p">:</span> <span class="c1"># SPACE</span>
+            <span class="n">plt</span><span class="o">.</span><span class="n">close</span><span class="p">(</span><span class="n">plt</span><span class="o">.</span><span class="n">gcf</span><span class="p">())</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Current mode is </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">__current_mode</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__on_click</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Callback on any simple mouseclick&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">helper_function</span><span class="o">.</span><span class="n">something_is_chosen_from_toolbar</span><span class="p">():</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;nothing further happens when toolbar is clicked&quot;</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">__current_mode</span> <span class="o">==</span> <span class="n">hr</span><span class="o">.</span><span class="n">EXCLUDE_INTERVAL</span><span class="p">:</span>
+            <span class="n">clicked_index</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__current_st_ind</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">xdata</span><span class="p">)</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">__exclusion_tracker</span><span class="o">.</span><span class="n">process_index</span><span class="p">(</span><span class="n">clicked_index</span><span class="p">)</span>
+            <span class="k">except</span> <span class="n">SecondIndexIsSmallerThanFirst</span> <span class="k">as</span> <span class="n">err</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;SecondIndexIsSmallerThanFirst Error: </span><span class="si">{</span><span class="n">err</span><span class="si">}</span><span class="se">\n</span><span class="s1">RETURNING&#39;</span><span class="p">)</span>
+                <span class="k">return</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">__visualize_exclusion_line</span><span class="p">(</span><span class="n">clicked_index</span><span class="p">)</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">__exclusion_tracker</span><span class="o">.</span><span class="n">current_interval_pair_is_finished</span><span class="p">():</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">__visualize_area</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">__visualize_exclusion_line</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">index</span><span class="p">):</span>
+        <span class="n">axis</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">gca</span><span class="p">()</span>
+        <span class="n">plot_index</span> <span class="o">=</span> <span class="n">index</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">__current_st_ind</span>
+        <span class="n">limits</span> <span class="o">=</span> <span class="n">helper_function</span><span class="o">.</span><span class="n">get_lims</span><span class="p">()</span>
+        <span class="n">axis</span><span class="o">.</span><span class="n">vlines</span><span class="p">(</span><span class="n">plot_index</span><span class="p">,</span> <span class="n">helper_function</span><span class="o">.</span><span class="n">get_min_y_val_of_current_axis</span><span class="p">(),</span>
+                    <span class="n">helper_function</span><span class="o">.</span><span class="n">get_max_y_val_of_current_axis</span><span class="p">(),</span> <span class="n">colors</span><span class="o">=</span><span class="s1">&#39;orange&#39;</span><span class="p">)</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">draw</span><span class="p">()</span>
+        <span class="n">helper_function</span><span class="o">.</span><span class="n">apply_lims</span><span class="p">(</span><span class="n">limits</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__visualize_area</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">start_index</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__exclusion_tracker</span><span class="o">.</span><span class="n">get_last_exclusion_pair</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> \
+                        <span class="bp">self</span><span class="o">.</span><span class="n">__current_st_ind</span>
+        <span class="n">plot_index</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__exclusion_tracker</span><span class="o">.</span><span class="n">get_last_exclusion_pair</span><span class="p">()[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> \
+                        <span class="bp">self</span><span class="o">.</span><span class="n">__current_st_ind</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">gca</span><span class="p">()</span><span class="o">.</span><span class="n">fill_betweenx</span><span class="p">(</span>
+                    <span class="p">[</span><span class="n">helper_function</span><span class="o">.</span><span class="n">get_min_y_val_of_current_axis</span><span class="p">(),</span>
+                     <span class="n">helper_function</span><span class="o">.</span><span class="n">get_max_y_val_of_current_axis</span><span class="p">()],</span>
+                    <span class="n">start_index</span><span class="p">,</span> <span class="n">plot_index</span><span class="p">,</span> <span class="n">facecolor</span><span class="o">=</span><span class="s1">&#39;orange&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.1</span><span class="p">)</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">draw</span><span class="p">()</span>
+
+    <span class="c1"># if close to multiple objects, on_pick is called multiple times with different artist</span>
+    <span class="k">def</span> <span class="nf">__on_pick</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Callback on picker&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">helper_function</span><span class="o">.</span><span class="n">something_is_chosen_from_toolbar</span><span class="p">():</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;nothing further happens when toolbar is clicked&quot;</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">__current_mode</span> <span class="o">==</span> <span class="n">hr</span><span class="o">.</span><span class="n">DEL_PEAK</span> <span class="ow">and</span> <span class="n">hr</span><span class="o">.</span><span class="n">ECG_PEAKS</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">artist</span><span class="p">):</span>
+            <span class="n">x_axis_value</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">mouseevent</span><span class="o">.</span><span class="n">xdata</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;now i delete </span><span class="si">{</span><span class="n">x_axis_value</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">__delete_index_from_ecg_rpeak_indices</span><span class="p">(</span><span class="n">x_axis_value</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">__redraw_ecg_peaks</span><span class="p">()</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">__current_mode</span> <span class="o">==</span> <span class="n">hr</span><span class="o">.</span><span class="n">ADD_PEAK</span> <span class="ow">and</span> <span class="n">hr</span><span class="o">.</span><span class="n">ECG_SIGNAL</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">artist</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">__add_maximum_value_in_adjacency_to_ecg_peaks</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">__current_mode</span> <span class="o">==</span> <span class="n">hr</span><span class="o">.</span><span class="n">EXACT_PICKING</span> <span class="ow">and</span> <span class="n">hr</span><span class="o">.</span><span class="n">ECG_SIGNAL</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">artist</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">__add_this_xval_to_ecg_peaks</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__delete_index_from_ecg_rpeak_indices</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x_axis_val</span><span class="p">):</span>
+        <span class="n">clicked_index</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__current_st_ind</span> <span class="o">+</span> <span class="n">x_axis_val</span>
+        <span class="n">index_del_item</span> <span class="o">=</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">__ecg_rpeak_indices</span> <span class="o">-</span> <span class="n">clicked_index</span><span class="p">))</span><span class="o">.</span><span class="n">argmin</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__ecg_rpeak_indices</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">__ecg_rpeak_indices</span><span class="p">,</span> <span class="n">index_del_item</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__redraw_ecg_peaks</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">limits</span> <span class="o">=</span> <span class="n">helper_function</span><span class="o">.</span><span class="n">get_lims</span><span class="p">()</span>
+        <span class="n">helper_function</span><span class="o">.</span><span class="n">delete_line_of_plotted_peaks</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__plot_peaks</span><span class="p">()</span>
+        <span class="n">helper_function</span><span class="o">.</span><span class="n">apply_lims</span><span class="p">(</span><span class="n">limits</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__plot_peaks</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;plot the peaks&quot;&quot;&quot;</span>
+        <span class="n">end_ind</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__current_st_ind</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">__sampling_rate</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">__window_size_s</span>
+        <span class="n">cur_peaks</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__ecg_rpeak_indices</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+                            <span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">__ecg_rpeak_indices</span><span class="o">&gt;</span><span class="bp">self</span><span class="o">.</span><span class="n">__current_st_ind</span><span class="p">,</span>
+                                           <span class="bp">self</span><span class="o">.</span><span class="n">__ecg_rpeak_indices</span><span class="o">&lt;</span><span class="n">end_ind</span><span class="p">))]</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">cur_peaks</span><span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">__current_st_ind</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">__ecg</span><span class="p">[</span><span class="n">cur_peaks</span><span class="p">],</span> <span class="s2">&quot;xr&quot;</span><span class="p">,</span>
+                 <span class="n">label</span><span class="o">=</span><span class="n">hr</span><span class="o">.</span><span class="n">ECG_PEAKS</span><span class="p">,</span> <span class="n">picker</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">mew</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">ms</span><span class="o">=</span><span class="mi">12</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__add_maximum_value_in_adjacency_to_ecg_peaks</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event</span><span class="p">):</span>
+        <span class="n">all_local_maxima</span> <span class="o">=</span> <span class="n">argrelextrema</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">__ecg</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">greater</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">clicked_abs_index</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__current_st_ind</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">mouseevent</span><span class="o">.</span><span class="n">xdata</span><span class="p">)</span>
+        <span class="n">index_to_be_added</span> <span class="o">=</span> <span class="n">all_local_maxima</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">all_local_maxima</span> <span class="o">-</span> <span class="n">clicked_abs_index</span><span class="p">)</span><span class="o">.</span><span class="n">argmin</span><span class="p">()]</span>
+        <span class="n">position_of_new_index</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argmax</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">__ecg_rpeak_indices</span><span class="o">&gt;</span><span class="n">index_to_be_added</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__ecg_rpeak_indices</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">__ecg_rpeak_indices</span><span class="p">,</span> <span class="n">position_of_new_index</span><span class="p">,</span>\
+                                             <span class="n">index_to_be_added</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__redraw_ecg_peaks</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">__add_this_xval_to_ecg_peaks</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event</span><span class="p">):</span>
+        <span class="n">clicked_abs_index</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__current_st_ind</span> <span class="o">+</span> <span class="nb">round</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">mouseevent</span><span class="o">.</span><span class="n">xdata</span><span class="p">)</span>
+        <span class="c1"># WARNING: this line does not work with click after last peak</span>
+        <span class="n">position_for_insertion</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argmax</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">__ecg_rpeak_indices</span><span class="o">&gt;</span><span class="n">clicked_abs_index</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__ecg_rpeak_indices</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">__ecg_rpeak_indices</span><span class="p">,</span> <span class="n">position_for_insertion</span><span class="p">,</span>\
+                                             <span class="n">clicked_abs_index</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__redraw_ecg_peaks</span><span class="p">()</span>
+
+<div class="viewcode-block" id="Proband.process_exclusions_and_save_rpeaks_file"><a class="viewcode-back" href="../index.html#visualize_hr_one_subject.Proband.process_exclusions_and_save_rpeaks_file">[docs]</a>    <span class="k">def</span> <span class="nf">process_exclusions_and_save_rpeaks_file</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">output_directory</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;store metadata and indices of rpeaks into file&quot;&quot;&quot;</span>
+        <span class="n">subject</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__data_path</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">ecg_header_dict</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__create_ecg_header</span><span class="p">(</span><span class="n">subject</span><span class="p">)</span>
+
+        <span class="n">ecg_peaks_as_float</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__get_ecg_peaks_with_exclusions</span><span class="p">()</span>
+        <span class="n">output_file</span> <span class="o">=</span> <span class="n">output_directory</span> <span class="o">+</span> <span class="s1">&#39;/&#39;</span> <span class="o">+</span> <span class="n">subject</span> <span class="o">+</span> <span class="s1">&#39;_ecg_rpeaks.txt&#39;</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">output_file</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">ecg_file</span><span class="p">:</span>
+            <span class="n">ecg_file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">ecg_header_dict</span><span class="p">)</span> <span class="o">+</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">rpeak</span> <span class="ow">in</span> <span class="n">ecg_peaks_as_float</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">rpeak</span><span class="p">):</span>
+                    <span class="n">ecg_file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;nan</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">ecg_file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">rpeak</span><span class="p">))</span> <span class="o">+</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">__create_ecg_header</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">subject</span><span class="p">):</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">times</span> <span class="o">=</span> <span class="n">file_reader</span><span class="o">.</span><span class="n">load_metadata</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">__data_path</span><span class="p">)</span>
+        <span class="n">ecg_header_dict</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;subject_tag&quot;</span><span class="p">:</span> <span class="n">subject</span><span class="p">,</span>
+                       <span class="s2">&quot;sampling_rate&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">__sampling_rate</span><span class="p">,</span>
+                       <span class="s2">&quot;start_time&quot;</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="n">times</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span><span class="s2">&quot;%H:%M:%S.</span><span class="si">%f</span><span class="s2">&quot;</span><span class="p">)[:</span><span class="o">-</span><span class="mi">3</span><span class="p">]}</span>
+        <span class="n">ecg_header_dict</span><span class="p">[</span><span class="s2">&quot;columns&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;index of rpeak in data_file&quot;</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">ecg_header_dict</span>
+
+    <span class="k">def</span> <span class="nf">__get_ecg_peaks_with_exclusions</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">ecg_peaks_as_float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">__ecg_rpeak_indices</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
+        <span class="n">exclusion_data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__exclusion_tracker</span><span class="o">.</span><span class="n">get_all_exclusions</span><span class="p">()</span>
+        <span class="n">exclusion_data</span> <span class="o">=</span> <span class="p">[</span><span class="nb">float</span><span class="p">(</span><span class="n">i</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">exclusion_data</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">even_index</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">exclusion_data</span><span class="p">),</span> <span class="mi">2</span><span class="p">):</span>
+            <span class="n">cur_start_excl</span> <span class="o">=</span> <span class="n">exclusion_data</span><span class="p">[</span><span class="n">even_index</span><span class="p">]</span>
+            <span class="n">cur_end_excl</span> <span class="o">=</span> <span class="n">exclusion_data</span><span class="p">[</span><span class="n">even_index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span>
+            <span class="n">peaks_to_exclude</span> <span class="o">=</span> <span class="n">ecg_peaks_as_float</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+                            <span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="n">ecg_peaks_as_float</span><span class="o">&gt;</span><span class="n">cur_start_excl</span><span class="p">,</span>
+                                           <span class="n">ecg_peaks_as_float</span><span class="o">&lt;</span><span class="n">cur_end_excl</span><span class="p">))]</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">peaks_to_exclude</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">peak</span> <span class="ow">in</span> <span class="n">peaks_to_exclude</span><span class="o">.</span><span class="n">tolist</span><span class="p">():</span>
+                    <span class="n">ecg_peaks_as_float</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">ecg_peaks_as_float</span><span class="o">==</span><span class="n">peak</span><span class="p">)]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">peaks_to_exclude</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">position</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argmax</span><span class="p">(</span><span class="n">ecg_peaks_as_float</span><span class="o">&gt;</span><span class="n">cur_end_excl</span><span class="p">)</span>
+                <span class="n">ecg_peaks_as_float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="n">ecg_peaks_as_float</span><span class="p">,</span> <span class="n">position</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">ecg_peaks_as_float</span>
+
+<div class="viewcode-block" id="Proband.save_exclude_file"><a class="viewcode-back" href="../index.html#visualize_hr_one_subject.Proband.save_exclude_file">[docs]</a>    <span class="k">def</span> <span class="nf">save_exclude_file</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">output_path</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;save the exclusion area to separate file&quot;&quot;&quot;</span>
+        <span class="n">subject</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__data_path</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">file_name</span> <span class="o">=</span> <span class="n">output_path</span> <span class="o">+</span> <span class="s2">&quot;/&quot;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">subject</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;_exclusions.txt&quot;</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">file_name</span><span class="p">,</span> <span class="s2">&quot;w&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">exclusion_file</span><span class="p">:</span>
+            <span class="n">exclusions</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__exclusion_tracker</span><span class="o">.</span><span class="n">get_all_exclusions</span><span class="p">()</span>
+            <span class="k">for</span> <span class="n">excl</span> <span class="ow">in</span> <span class="n">exclusions</span><span class="p">:</span>
+                <span class="n">exclusion_file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">excl</span><span class="si">}</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span></div></div>
+
+<div class="viewcode-block" id="visualize_one_subject"><a class="viewcode-back" href="../index.html#visualize_hr_one_subject.visualize_one_subject">[docs]</a><span class="k">def</span> <span class="nf">visualize_one_subject</span><span class="p">(</span><span class="n">subject</span><span class="p">,</span> <span class="n">window_in_s</span><span class="o">=</span><span class="mi">30</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Main function&quot;&quot;&quot;</span>
+    <span class="n">main_data_dir</span> <span class="o">=</span> <span class="n">get_data_path</span><span class="p">()</span>
+    <span class="n">path_to_data_file</span> <span class="o">=</span> <span class="n">main_data_dir</span> <span class="o">+</span> <span class="s2">&quot;/01_measurements/&quot;</span> <span class="o">+</span> <span class="n">subject</span> <span class="o">+</span> <span class="s2">&quot;_data.txt&quot;</span>
+    <span class="n">path_rpeaks_output</span> <span class="o">=</span> <span class="n">main_data_dir</span> <span class="o">+</span> <span class="s2">&quot;/07_hr_rpeaks/&quot;</span>
+    <span class="n">prob</span> <span class="o">=</span> <span class="n">Proband</span><span class="p">(</span><span class="n">path_to_data_file</span><span class="p">,</span> <span class="n">window_in_s</span><span class="p">)</span>
+    <span class="n">prob</span><span class="o">.</span><span class="n">load_data</span><span class="p">()</span>
+    <span class="n">prob</span><span class="o">.</span><span class="n">visualize_iteratively</span><span class="p">()</span>
+    <span class="n">prob</span><span class="o">.</span><span class="n">process_exclusions_and_save_rpeaks_file</span><span class="p">(</span><span class="n">path_rpeaks_output</span><span class="p">)</span></div>
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Usage: Pass subject tag as argument 1&quot;</span><span class="p">)</span>
+        <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">()</span>
+
+    <span class="n">subject_tag</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+    <span class="n">visualize_one_subject</span><span class="p">(</span><span class="n">subject_tag</span><span class="p">)</span>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper"><div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2021, Johannes Feiler.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 3.2.1</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>
