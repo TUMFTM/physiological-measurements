@@ -133,6 +133,9 @@ If the installation via the `environment_*.yml` file does not work, the installa
 
 ## References
 
+This package is citable via  
+[![DOI](https://zenodo.org/badge/421737812.svg)](https://zenodo.org/badge/latestdoi/421737812)
+
 This package uses some functionality provided by
 
 - Makowski, D., Pham, T., Lau, Z. J., Brammer, J. C., Lespinasse, F., Pham, H., Schölzel, C., & Chen, S. A. (2021).
