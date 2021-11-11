@@ -133,7 +133,8 @@ If the installation via the `environment_*.yml` file does not work, the installa
 
 ## References
 
-This package is citable via  
+This package is citable via 
+- Johannes Feiler, **"Physiological Measurements"**, Lehrstuhl für Fahrzeugtechnik, TUM, 2021.  
 [![DOI](https://zenodo.org/badge/421737812.svg)](https://zenodo.org/badge/latestdoi/421737812)
 
 This package uses some functionality provided by
@@ -142,4 +143,8 @@ This package uses some functionality provided by
   NeuroKit2: A Python toolbox for neurophysiological signal processing. Behavior Research Methods, 53(4), 1689–1696.
   <https://doi.org/10.3758/s13428-020-01516-y>
 
-The BITalino software 'OpenSignals (r)evolution' can be downloaded [here](https://bitalino.com/downloads/software)
+The BITalino software 'OpenSignals (r)evolution' can be downloaded [here](https://bitalino.com/downloads/software
+
+## Contact
+
+If there are any issue or questions regarding this package, please do not hesitate to contact me at johannes.feiler@tum.de
